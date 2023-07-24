@@ -1,0 +1,278 @@
+/*
+	任务三：用“生产者-消费者”模型实现选题1的单词统计功能
+	使用到自己改编重写的P/V操作以及选题1中的重要数据结构
+*/
+#include<iostream>//异常输出时需要用io流的cerr
+#include<cstdio>//基本格式的输入输出
+#include<cstdlib>//使用了malloc申请全局内存，以及调用了信号量互斥访问的函数
+#include<pthread.h>//线程库函数
+#include<unistd.h>//系统调用API接口用于获取当前目录
+#include<ctime>//统计时间以及生成种子以便随机生成生产者待生产的字符
+#include<exception>//便于C++的try-catch-throw的异常
+#include<cstring>//字符串操作的库函数
+#include<map>//用来存储单词出现次数
+#include<algorithm>//排序算法必备
+#include<vector>//排序的辅助向量
+#include<set>//创建了无用词集合
+#include<fstream>//文件流读取
+#include<sstream>// istringstream
+using namespace std;
+
+bool cmp(const pair<string,int> &p1,const pair<string,int> &p2);//排序所用的比较函数
+void Print();//打印结果
+void InitWord();//词库初始化
+bool Ismeaningful(string ch);//检查该单词是否是有意义的
+//宏定义一些变量和信号量，方便进行调试
+#define N 10			 //缓冲区的大小
+#define ProNum 3		 //生产者的数量
+#define ConNum 3		 //消费者的数量
+#define SleepTime 0		 //生产者消费者操作完后的暂停时间
+/*因为任务三注重的是结果，所以中间并不需要去暂停*/
+typedef int semaphore;	 //定义信号量的类型均为整数
+typedef string element;	 //定义生产者生产的元素都是string字符串
+element buffer[N]; //定义长度为 N 的缓冲区，内容均是字符型
+set<string> st;//存储意义不大的介词、冠词等单词
+int in = 0;				 //缓冲区下一个存放产品的索引
+int out = 0;			 //缓冲区下一个可以使用的产品索引
+int ProCount = 0;		 //生产者序号统计
+int ConCount = 0;		 //消费者序号统计
+double StartTime;		 //程序开始时间记录，方便输出执行语句的时间
+map<string,int>mp;//创建结果的map
+int sum_num=0;//单词结果的总数
+char *Buffer;//模拟从文件读取的数据块放入的磁盘缓冲区
+int pointer=0;//上一行Buffer数组的索引指针
+bool flag=false;//判断磁盘缓冲区的字符是否读完，若读完则为true，未读完为false
+const int print_num = 5;//定义每行打印多少单词
+/*
+	定义并初始化信号量
+	mutex 用来控制生产和消费每个时刻只有一个在进行，初始化为 1，用来实现互斥
+	empty 表示剩余的可用来存放产品的缓冲区大小，用来实现同步，刚开始有 N 个空位置
+	full 表示当前缓冲区中可用的产品数量，用来实现同步，刚开始没有产品可以使用
+*/
+semaphore mutex = 1, empty = N, full = 0;
+
+
+bool cmp(const pair<string,int> &p1,const pair<string,int> &p2);//排序所用的比较函数
+bool Isword(char ch){
+	if((ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z'))//只有大小写字母才可以组成单词
+		return true;
+	return false;
+}
+//生产者线程
+void *Producer(void *args)
+{
+	int *x = (int *)args;
+	int sum = 0;
+    if(Buffer[pointer]=='\0'){//到达了缓冲区尾部
+        flag=true;
+        return NULL;
+    }
+	while (Buffer[pointer]!='\0')
+	{
+		/*同步操作：P(empty),判断是否有空位置供存放生产的产品，没有空位则等待并输出提示语句*/
+		while (empty <= 0) // 
+			printf("%.4lfs| 缓 冲 区 已 满 ! 生 产 者 :%d 等待中......\n", (clock() - StartTime) / CLOCKS_PER_SEC, *x);
+		empty--; //等到一个空位置，我们先把他占用
+
+		/*互斥操作： // P(mutex),判断当前临界区中是否有进程正在生产或者消费,如果有则等待并输出提示语句*/
+		while (mutex <= 0)
+			printf("%.4lfs|	缓冲区有进程正在操作 !	生产者 :%d 等待中......\n", (clock() - StartTime) / CLOCKS_PER_SEC, *x);
+		mutex--; //等到占用进程出临界区，进入临界区并占用
+		string word="";//目前待统计的单词
+		/*
+			生产者的生产过程：
+			生产了一个产品后，输出生产成功的字样;
+			然后将其放入buffer缓冲区中，in代表循环队列队尾的指针移动，以便下一个产品的生产
+		*/
+		while(1){
+			/*在单词分割的循环里如果已经到达缓冲区尾部，就强行停止
+			为什么外部循环有判断缓冲区尾部的判断了，这里还加
+			是因为内循环的while(1)循环中可能恰好分割完最后的单词
+			如果这里不填加if限制，会导致段错误数组溢出*/
+			if(Buffer[pointer]=='\0'){
+				flag=true;
+				return NULL;
+			}
+				
+            if(Isword(Buffer[pointer])){
+                word+=Buffer[pointer];
+                pointer++;
+            }
+            else{
+                /*如果当前单词串为空,直接读入字符但是不插入word（因为不是字母）*/
+                if(word==""){
+                    pointer++;
+                    continue;
+                }
+                pointer++;
+                break;
+            }
+        }
+        
+        printf("%.4lfs| 生产者: %d 生产一个产品: %s ,并将其放入缓冲区: %d 位置\n", (clock() - StartTime) / CLOCKS_PER_SEC, *x, word.c_str(), in);//输出生产成功的字样
+		buffer[in] = word; //将生产的产品存入缓冲区
+        word="";
+		in = (in + 1) % N; //缓冲区索引更新
+
+		/*互斥操作：V(mutex),临界区使用完成释放信号*/
+		mutex++;
+
+		/*同步操作：V(full),实现同步，释放 full*/
+		full++;
+
+		/*生产者生产之后让它休息一下，采用sleep实现*/
+		sleep(SleepTime); //休眠时间设为0
+	}
+	return NULL;
+}
+
+//消费者线程
+void *Consumer(void *args)
+{
+	int *x = (int *)args;
+	int sum = 0;
+	while (!flag)
+	{
+		/*同步操作：P(full),判断缓冲区当中是否有产品可以消费，同步如果没有产品则等待同时输出提示语句*/
+		while (full <= 0) 
+			printf("%.4lfs| \t\t\t\t\t\t\t 缓冲区为空！消费者: %d 等待中......\n", (clock() - StartTime) / CLOCKS_PER_SEC, *x);
+		full--; //等到有一个产品，消费这个产品
+
+		/*互斥操作：P(mutex),判断临界区是否有进程在处理,如果有则等待并输出提示语句*/
+		while (mutex <= 0) 
+			printf("%.4lfs| \t\t\t\t\t\t\t 缓冲区有进程正在操作! 消费者 : %d 等待中......\n", (clock() - StartTime) / CLOCKS_PER_SEC, *x);
+		mutex--; //等到临界区为空，则进入缓冲区消费
+
+		/*
+			消费者的消费过程：
+			发现有能够消费的产品，我们就输出消费成功的字样;
+			然后将其从buffer缓冲区中取出，out代表循环队列队首的指针移动，以便下一个产品的消费
+		*/
+		printf("%.4lfs| \t\t\t\t\t\t\t 消费者: %d 消费一个产品: %s , 将其从缓冲区取出 : %d 位置 \n", (clock() - StartTime) / CLOCKS_PER_SEC, *x, buffer[out].c_str(), out);//输出消费成功的语句
+		mp[buffer[out]]++;//取出缓冲区内单词
+        buffer[out] = ""; //更新缓冲区，把消费掉的产品清空
+		sum_num++;//文章单词总数+
+		out = (out + 1) % N; //更新缓冲区索引
+
+		/*互斥操作：V(mutex)，消费完成退出缓冲区，释放资源*/
+		mutex++;
+
+		/*同步操作：V(full)，消费完成产生一个空位，进行同步*/
+		empty++;
+
+		/*消费者消费之后让它休息一下，采用sleep实现*/
+		sleep(SleepTime); //休眠时间设为0
+	}
+	return NULL;
+}
+
+
+int main(int argc,char* argv[])
+{
+    char filename[20];
+    strcpy(filename,argv[1]);
+	/*
+		阶段一：一系列的初始化，包括开始时钟的记录，随机种子预备，待读取文章以及输出界面初始化
+	*/
+	InitWord();//词库初始化
+	StartTime = clock(); //记录程序开始的时间，方便记录消费者和生产者活动的时间
+	printf(" 计时");
+	printf("    \t\t 生产者动态显示");
+	printf("          \t\t\t\t 消费者动态显示\n");
+	printf("======================================================================================================================\n");
+	
+	FILE *p=fopen(filename,"r");//打开文件
+	/*获取文件的大小*/
+    printf("wocao\n");
+	fseek(p,0,SEEK_END);
+	long lSize=ftell(p);
+	rewind(p);
+    /*分配能完整读取文件的缓冲区大小*/
+	Buffer=(char*)malloc(lSize*sizeof(char));
+	/*开始用fread将字符全部读入缓冲区*/
+	fread(Buffer,sizeof(char),lSize,p);
+	fclose(p);//读完这个文件了就关闭文件
+    /*
+		阶段二：进行线程的创建，在本题中有3个生产者3个消费者，因此需要大小为6的线程数组
+		分别创建三个生产者线程以及三个消费者线程
+	*/
+
+	pthread_t threadPool[ProNum + ConNum];//定义一个线程数组，存储所有的消费者和生产者线程,
+	//创建生产者
+	int t1=1,t2=2,t3=3;
+	pthread_create(&threadPool[0], NULL, Producer, (void *)&t1);
+	pthread_create(&threadPool[1], NULL, Producer, (void *)&t2);
+	pthread_create(&threadPool[2], NULL, Producer, (void *)&t3);
+	//创建消费者
+	pthread_create(&threadPool[3], NULL, Consumer, (void *)&t1);
+	pthread_create(&threadPool[4], NULL, Consumer, (void *)&t2);
+	pthread_create(&threadPool[5], NULL, Consumer, (void *)&t3);
+	/*
+		阶段三：线程结束资源的回收
+		在这里因为涉及到线程回收因此要添加异常检测
+	*/
+	void *result;
+	for (int i = 0; i < ProNum + ConNum; i++) //等待线程结束并回收资源，线程之间同步
+	{
+		int Return=pthread_join(threadPool[i], &result);
+		try{
+			if (Return== -1) throw Return;
+		}
+		catch(int){
+			cerr<<"检测到线程回收失败"<<endl;//回收失败的错误提示
+			exit(1);//结束线程
+		}
+	}
+	Print();
+}
+
+/*自定义cmp用于后期排序使用*/
+bool cmp(const pair<string,int> &p1,const pair<string,int> &p2){
+	if(p1.second==p2.second)
+		return p1.first<p2.first;
+	return p1.second>p2.second;
+}
+/*输出统计结果*/
+void Print(){
+	printf("单词总数 : %d\n",sum_num);
+	/*默认的map是按key排序的,输出之前换用value排序*/
+	vector<pair<string,int>> arr;
+   for(map<string,int>::iterator it=mp.begin();it!=mp.end();++it)
+	arr.push_back(make_pair(it->first,it->second));
+   sort(arr.begin(),arr.end(),cmp);//对vector排序
+	/*遍历vector等效作为遍历map容器*/
+	printf("现展示出现频率top20的单词如下:\n");
+	FILE *fp;
+	fp=fopen("result.txt","w");
+	int i,k=1;
+	for(vector<pair<string,int>>::iterator it=arr.begin();it!=arr.end();++it){
+		i++;
+		if(k<=20){
+			if(Ismeaningful(it->first)){
+				printf("%04d : %s ", it->second, (it->first).c_str());
+   				for(int j = 20 - (it->first).size();j > 0;j--) putchar(' ');
+				if(k % print_num == 0) puts("");
+				k++;
+			}
+		}
+		fprintf(fp,"%05d : %s ", it->second, (it->first).c_str());
+   		for(int j = 20 - (it->first).size();j > 0;j--) fputs(" ",fp);
+		if(i % print_num == 0) fputs("\n",fp);
+	}
+	if(i % print_num != 0) fputs("\n",fp);
+	printf("具体所有单词统计结果请查看本目录下'result.txt'文件\n");
+}
+void InitWord(){
+	ifstream fp("words.txt");//打开文件
+	char s[100];
+	while(!fp.eof()){
+		fp.getline(s,100);
+		st.insert(s);
+	}
+}
+bool Ismeaningful(string ch)
+{
+	/*如果单词不在集合里，说明是有意义的*/
+	if(st.count(ch)==0) return true;
+	return false;
+}

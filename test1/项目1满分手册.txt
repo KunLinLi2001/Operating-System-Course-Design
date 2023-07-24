@@ -1,0 +1,35 @@
+特殊注意事项：
+1.如果打开文件代码中文显示乱码，请打开同目录下"备份代码文件夹寻找同名的.txt文件复制粘贴进.cpp文件"
+如果仍显示乱码，检查下编辑环境是否为UTF-8格式的编码
+2.同理终端也检查下是否为UTF-8格式的编码
+3.编译运行需要事先准备好g++
+终端执行：sudo apt-get install g++
+4.为了代码顺利执行，建议在编译前就做第一步操作去检查代码注释以及输出语句里的中文是否正常
+5.终端路径一定是在test1文件夹下！！
+5.（以后尽量不写中文了）
+
+以下所有代码的运行结果均为：
+一、线程状态(开始/结束)、单篇文章字数、所有文章字数、top20热词以及个数输出在终端框里
+（因为所有单词数目太多所以仅在终端输出频数最高的前20种单词）
+二、所有单词数目保存在终端提示的对应的res某.txt文件
+
+1. fgetc/fscanf + 多线程统计：
+编译：g++ fgetc_thread.cpp -o fgetc_thread -lpthread
+运行：./fgetc_thread ./story
+平均用时1900000微秒(1.9秒)
+
+2.fgetc/fscanf + 单线程统计：
+编译：g++ fgetc_while.cpp -o fgetc_while -lpthread
+运行：./fgetc_while ./story
+平均用时320000微秒(0.32秒)
+
+3.fread + 多线程统计：
+编译：g++ fread_thread.cpp -o fread_thread -lpthread
+运行：./fread_thread ./story
+平均用时1770000微秒(1.77秒)
+
+4.fread + 单线程统计：
+编译：g++ fread_while.cpp -o fread_while -lpthread
+运行：./fread_while ./story
+平均用时291000微秒(0.29秒)
+
